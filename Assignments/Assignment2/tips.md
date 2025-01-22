@@ -1,5 +1,7 @@
 Help Information and Tips
+
 Hints/Tips
+
 Often time when string processing you should consider creating a state machine for your logic and flushing out how the transformations will work. For example, the print_words() function needs to keep track of when words begin and end. Given you pre-processed the input, for example "  hello class" would already have been transformed into "hello class...........<to end of buffer>" you can assume the first character is the start of a word. You can then increment your word counter, and set start of word to false. If you encounter a space, you set start of word to true. If you don't encounter a space you print the character. When just getting started sometimes its even helpful to map out an approach before you write code. For example:
 
 int print_words(char *buff, int buff_len, int str_len)  where:
