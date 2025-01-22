@@ -1,5 +1,7 @@
 HW1: C Programming Refresher
+
 Description
+
 The purpose of this assignment is a warm up to refresh your memory about how to program in C.
 
 You will be writing a simple Text Line Processor utility in C. The program will allow users to provide a string and a command line operation indicating the operation that you will perform on the provided string. The command line for this program is as follows:
