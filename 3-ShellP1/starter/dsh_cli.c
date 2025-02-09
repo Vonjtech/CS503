@@ -7,7 +7,7 @@
 
 int main()
 {
-    char cmd_buff[SH_CMD_MAX]; // Buffer to store use input
+    char cmd_buff[SH_CMD_MAX]; // Buffer store user input
     command_list_t clist;      //  hold parsed commands
     int rc;                    // code Return 
 
