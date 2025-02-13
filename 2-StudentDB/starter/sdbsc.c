@@ -1,12 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h> //c library for system call file routines
+#include <fcntl.h> //system call file routines
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <stdbool.h>
 
-// database include files
+// Include files database
 #include "db.h"
 #include "sdbsc.h"
 
