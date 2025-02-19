@@ -46,49 +46,63 @@
  */
 int main()
 {
+    char cmd_buff[SH_CMD_MAX]; // Buffer for user input
+    int rc = 0;
     command_list_t clist;
 
-    char *cmd_buff = (char *)malloc(SH_CMD_MAX);
-    if (!cmd_buff)
-    {
-        fprintf(stderr, "Memory allocation failed\n");
-        return EXIT_FAILURE;
-    }
 
-    while (1)
-    {
+    while (1) {
+        // Display the shell prompt
         printf("%s", SH_PROMPT);
-        if (fgets(cmd_buff, SH_CMD_MAX, stdin) == NULL)
-        {
-            printf("\n");
+        fflush(stdout);  // Ensure prompt is displayed before user input
+
+        // Read input from user
+        if (fgets(cmd_buff, SH_CMD_MAX, stdin) == NULL) {
+            printf("\n"); // Handle EOF
+            //rc = 0;
             break;
         }
+
+        // Remove trailing newline character
         cmd_buff[strcspn(cmd_buff, "\n")] = '\0';
-        if (strcmp(cmd_buff, EXIT_CMD) == 0)
+
+        // Check for empty input
+        if (strlen(cmd_buff) == 0) {
+            printf(CMD_WARN_NO_CMD);
+            continue;
+        }
+
+        // Exit command handling
+        if (strcmp(cmd_buff, EXIT_CMD) == 0) {
             break;
+        }
 
-        int rc = build_cmd_list(cmd_buff, &clist);
+        // Parse the input into command list
+        rc = build_cmd_list(cmd_buff, &clist);
 
-        if (rc == OK)
-        {
+        // Handle possible errors
+        if (rc == WARN_NO_CMDS) {
+            printf(CMD_WARN_NO_CMD);
+            rc =0; // Reset error code 
+        } else if (rc == ERR_TOO_MANY_COMMANDS) {
+            printf(CMD_ERR_PIPE_LIMIT, CMD_MAX);
+            rc =0; // Reset error code 
+        } else {
+            // Print parsed output
             printf(CMD_OK_HEADER, clist.num);
-            for (int i = 0; i < clist.num; i++)
-            {
-                printf("Command %d:\n  exe: %s\n  args: %s\n", i + 1, clist.commands[i].exe, clist.commands[i].args);
+            for (int i = 0; i < clist.num; i++) {
+                if (strlen(clist.commands[i].args) > 0) {
+                    printf("<%d>%s[%s]\n", i + 1, clist.commands[i].exe, clist.commands[i].args);
+                } else {
+                    printf("<%d>%s\n", i + 1, clist.commands[i].exe);
+                }
             }
         }
-        else if (rc == WARN_NO_CMDS)
-        {
-            printf(CMD_WARN_NO_CMD);
-        }
-        else if (rc == ERR_TOO_MANY_COMMANDS)
-        {
-            printf(CMD_ERR_PIPE_LIMIT, CMD_MAX);
-        }
     }
-    free(cmd_buff);
-    return EXIT_SUCCESS;
 
-    printf(M_NOT_IMPL);
-    exit(EXIT_NOT_IMPL);
+    return 0;
+
+
+    //printf(M_NOT_IMPL);
+    //exit(EXIT_NOT_IMPL);
 }
