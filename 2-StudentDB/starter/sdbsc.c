@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 
-// Include files database
+// database include files
 #include "db.h"
 #include "sdbsc.h"
 
