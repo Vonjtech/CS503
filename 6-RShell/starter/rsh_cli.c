@@ -1,6 +1,5 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,9 +10,12 @@
 #include "dshlib.h"
 #include "rshlib.h"
 
+
+
+
 /*
  * exec_remote_cmd_loop(server_ip, port)
- *      server_ip:  a string in ip address format, indicating the server's IP
+ *      server_ip:  a string in ip address format, indicating the servers IP
  *                  address.  Note 127.0.0.1 is the default meaning the server
  *                  is running on the same machine as the client
  *              
@@ -25,7 +27,7 @@
  *              number and the server address is 10.50.241.18    
  * 
  *      This function basically implements the network version of 
- *      exec_local_cmd_loop() from the last assignment.  It will:
+ *      exec_local_cmd_loop() from the last assignemnt.  It will:
  *  
  *          1. Allocate buffers for sending and receiving data over the 
  *             network
@@ -37,7 +39,7 @@
  *             a. Accept a command from the user via fgets()
  *             b. Send that command to the server using send() - it should
  *                be a null terminated string
- *             c. Go into a loop and receive client responses.  Note each
+ *             c. Go into a loop and receive client requests.  Note each
  *                receive might not be a C string so you need to print it
  *                out using:
  *                     printf("%.*s", (int)bytes_received, rsp_buff);
@@ -84,155 +86,173 @@
  *   return client_cleanup(cli_socket, request_buff, resp_buff, OK);
  *
  *   The above will return ERR_RDSH_COMMUNICATION and OK respectively to the main()
- *   function after cleaning things up. See the documentation for client_cleanup()
+ *   function after cleaning things up.  See the documentation for client_cleanup()
+ *      
  */
- int exec_remote_cmd_loop(char *address, int port) {
-    char *cmd_buff;
-    char *rsp_buff;
-    int send_len, bytes_sent, recv_bytes;
+int exec_remote_cmd_loop(char *address, int port)
+{
+    
+    int cli_socket;
+    char *cmd_buff, *rsp_buff;
+    ssize_t recv_size;
 
-    // Allocate buffers for sending and receiving data.
-    cmd_buff = malloc(RDSH_COMM_BUFF_SZ);
-    rsp_buff = malloc(RDSH_COMM_BUFF_SZ);
+    // Allocate buffers for command input and response storage
+    cmd_buff = (char *)malloc(SH_CMD_MAX);
+    rsp_buff = (char *)malloc(RDSH_COMM_BUFF_SZ);
+
     if (!cmd_buff || !rsp_buff) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
         return client_cleanup(-1, cmd_buff, rsp_buff, ERR_MEMORY);
     }
-    memset(cmd_buff, 0, RDSH_COMM_BUFF_SZ);
-    memset(rsp_buff, 0, RDSH_COMM_BUFF_SZ);
 
-    // Command loop: For each command, open a new connection.
-    while (1) {
-        printf("%s", SH_PROMPT);
-        fflush(stdout);
-
-        // Get the command from the user.
-        if (fgets(cmd_buff, RDSH_COMM_BUFF_SZ, stdin) == NULL) {
-            printf("\n");
-            break;
-        }
-        cmd_buff[strcspn(cmd_buff, "\n")] = '\0';
-        if (strlen(cmd_buff) == 0)
-            continue;
-        if (strcmp(cmd_buff, EXIT_CMD) == 0)
-            break;
-
-        // Connect to the server for this command.
-        int cli_socket = start_client(address, port);
-        if (cli_socket < 0) {
-            fprintf(stderr, "Failed to connect to server\n");
-            continue; // Optionally, you might break out here.
-        }
-
-        // Send the command (including the null terminator).
-        send_len = strlen(cmd_buff) + 1;
-        bytes_sent = send(cli_socket, cmd_buff, send_len, 0);
-        if (bytes_sent != send_len) {
-            perror("send");
-            client_cleanup(cli_socket, cmd_buff, rsp_buff, ERR_RDSH_COMMUNICATION);
-            continue;
-        }
-
-        // Receive the response from the server.
-        while (1) {
-            recv_bytes = recv(cli_socket, rsp_buff, RDSH_COMM_BUFF_SZ, 0);
-            if (recv_bytes < 0) {
-                perror("recv");
-                break;
-            }
-            if (recv_bytes == 0) {
-                // Server closed the connection.
-                break;
-            }
-            int is_last_chunk = (rsp_buff[recv_bytes - 1] == RDSH_EOF_CHAR) ? 1 : 0;
-            if (is_last_chunk) {
-                // Replace the EOF marker with a null terminator.
-                rsp_buff[recv_bytes - 1] = '\0';
-            }
-            printf("%.*s", recv_bytes, rsp_buff);
-            if (is_last_chunk)
-                break;
-        }
-        printf("\n");
-        // Close the connection after processing one command.
-        close(cli_socket);
-        memset(rsp_buff, 0, RDSH_COMM_BUFF_SZ);
+    // Start the client (connect to the server)
+    cli_socket = start_client(address, port);
+    if (cli_socket < 0) {
+        return client_cleanup(cli_socket, cmd_buff, rsp_buff, ERR_RDSH_CLIENT);
     }
 
-    free(cmd_buff);
-    free(rsp_buff);
-    return OK;
-}
+    // Main client loop
+    while (1) {
+        // Print prompt and read user input
+        printf("%s", SH_PROMPT);
+        if (fgets(cmd_buff, SH_CMD_MAX, stdin) == NULL) {
+            printf("\n");
+            break;  // Exit loop on EOF (Ctrl+D)
+        }
 
+        // Remove trailing newline
+        cmd_buff[strcspn(cmd_buff, "\n")] = '\0';
+
+        // Ignore empty input
+        if (strlen(cmd_buff) == 0) continue;
+
+        // Send command to the server (including null terminator)
+        if (send(cli_socket, cmd_buff, strlen(cmd_buff) + 1, 0) < 0) {
+            perror("Error sending command to server");
+            return client_cleanup(cli_socket, cmd_buff, rsp_buff, ERR_RDSH_COMMUNICATION);
+        }
+
+        // Receive response from server
+        while ((recv_size = recv(cli_socket, rsp_buff, RDSH_COMM_BUFF_SZ, 0)) > 0) {
+            // Check if last byte is the EOF character
+            int is_last_chunk = (rsp_buff[recv_size - 1] == RDSH_EOF_CHAR) ? 1 : 0;
+            
+            // Replace EOF character with null terminator
+            if (is_last_chunk) {
+                rsp_buff[recv_size - 1] = '\0';
+            }
+
+            // Print response (handles both raw data and null-terminated strings)
+            printf("%.*s", (int)recv_size, rsp_buff);
+
+            // If EOF character received, stop receiving
+            if (is_last_chunk) break;
+        }
+
+        if (recv_size < 0) {
+            perror("Error receiving response from server");
+            return client_cleanup(cli_socket, cmd_buff, rsp_buff, ERR_RDSH_COMMUNICATION);
+        }
+    }
+
+    // Cleanup before exiting
+    return client_cleanup(cli_socket, cmd_buff, rsp_buff, OK);
+    
+    //return WARN_RDSH_NOT_IMPL;
+}
 
 /*
  * start_client(server_ip, port)
- *      server_ip:  a string in ip address format, indicating the server's IP
- *                  address. Note 127.0.0.1 is the default meaning the server
- *                  is running on the same machine as the client.
+ *      server_ip:  a string in ip address format, indicating the servers IP
+ *                  address.  Note 127.0.0.1 is the default meaning the server
+ *                  is running on the same machine as the client
  *              
- *      port:   The port the server will use. Note the constant 
- *              RDSH_DEF_PORT which is 1234 in rshlib.h. If you are using
+ *      port:   The port the server will use.  Note the constant 
+ *              RDSH_DEF_PORT which is 1234 in rshlib.h.  If you are using
  *              tux you may need to change this to your own default, or even
- *              better use the command line override -c implemented in dsh_cli.c.
- *              For example, "./dsh -c 10.50.241.18:5678" where 5678 is the new port
- *              number and the server address is 10.50.241.18.
+ *              better use the command line override -c implemented in dsh_cli.c
+ *              For example ./dsh -c 10.50.241.18:5678 where 5678 is the new port
+ *              number and the server address is 10.50.241.18    
  * 
  *      This function basically runs the client by: 
  *          1. Creating the client socket via socket()
  *          2. Calling connect()
- *          3. Returning the client socket after connecting to the server.
+ *          3. Returning the client socket after connecting to the server
  * 
  *   returns:
- *          client_socket:      The file descriptor fd of the client socket.
- *          ERR_RDSH_CLIENT:    If socket() or connect() fail.
+ *          client_socket:      The file descriptor fd of the client socket
+ *          ERR_RDSH_CLIENT:    If socket() or connect() fail
+ * 
  */
 int start_client(char *server_ip, int port) {
-    int sock;
+    int client_socket;
     struct sockaddr_in server_addr;
-    
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        perror("socket");
+
+    // Step 1: Create the client socket
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_socket < 0) {
+        perror("Error creating client socket");
         return ERR_RDSH_CLIENT;
     }
-    
+
+    // Step 2: Set up the server address struct
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons(port);  // Convert port to network byte order
+
+    // Step 3: Convert and assign the server IP address
     if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0) {
-        perror("inet_pton");
-        close(sock);
+        perror("Invalid server IP address");
+        close(client_socket);
         return ERR_RDSH_CLIENT;
     }
-    
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("connect");
-        close(sock);
+
+    // Step 4: Connect to the server
+    if (connect(client_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Error connecting to the server");
+        close(client_socket);
         return ERR_RDSH_CLIENT;
     }
-    
-    return sock;
+
+    printf("Connected to server at %s:%d\n", server_ip, port);
+    return client_socket;  // Return the connected socket descriptor
 }
+
 
 /*
  * client_cleanup(int cli_socket, char *cmd_buff, char *rsp_buff, int rc)
- *      cli_socket:   The client socket.
- *      cmd_buff:     The buffer that holds commands to send to the server.
- *      rsp_buff:     The buffer that holds server responses.
+ *      cli_socket:   The client socket
+ *      cmd_buff:     The buffer that will hold commands to send to server
+ *      rsp_buff:     The buffer that will hld server responses
  * 
  *   This function does the following: 
- *      1. If cli_socket > 0, calls close(cli_socket) to close the socket.
- *      2. Calls free() on cmd_buff and rsp_buff.
- *      3. Returns the value passed as rc.
+ *      1. If cli_socket > 0 it calls close(cli_socket) to close the socket
+ *      2. It calls free() on cmd_buff and rsp_buff
+ *      3. It returns the value passed as rc
  *  
- *   This helper function is intended to manage exit conditions from exec_remote_cmd_loop().
- *   It ensures that all allocated memory is freed and the socket is closed before returning.
+ *   Note this function is intended to be helper to manage exit conditions
+ *   from the exec_remote_cmd_loop() function given there are several
+ *   cleanup steps.  We provide it to you fully implemented as a helper.
+ *   You do not have to use it if you want to develop an alternative
+ *   strategy for cleaning things up in your exec_remote_cmd_loop()
+ *   implementation. 
+ * 
+ *   returns:
+ *          rc:   This function just returns the value passed as the 
+ *                rc parameter back to the caller.  This way the caller
+ *                can just write return client_cleanup(...)
+ *      
  */
-int client_cleanup(int cli_socket, char *cmd_buff, char *rsp_buff, int rc) {
-    if (cli_socket > 0) {
+int client_cleanup(int cli_socket, char *cmd_buff, char *rsp_buff, int rc){
+    //If a valid socket number close it.
+    if(cli_socket > 0){
         close(cli_socket);
     }
+
+    //Free up the buffers 
     free(cmd_buff);
     free(rsp_buff);
+
+    //Echo the return value that was passed as a parameter
     return rc;
 }
