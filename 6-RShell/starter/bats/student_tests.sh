@@ -13,73 +13,87 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "Remote: Piped command (ls | grep dshlib.c)" {
-    run ./dsh -c <<EOF
-ls | grep dshlib.c
-exit
-EOF
-    [ "$status" -eq 0 ]
-    # Expect the output to contain "dshlib.c"
-    [[ "$output" == *"dshlib.c"* ]]
+
+# Location of the compiled dsh executable
+DSH_EXEC="./dsh"
+
+# Server settings
+SERVER_IP="127.0.0.1"
+SERVER_PORT="5678"
+
+# Start the server in the background
+setup() {
+    # Kill any existing dsh server instances
+    pkill -f "$DSH_EXEC -s" || true
+
+    # Start the server in the background
+    $DSH_EXEC -s -i 0.0.0.0 -p $SERVER_PORT > server_output.log 2>&1 &
+    sleep 1  # Give the server some time to start
 }
 
-@test "Remote: Piped command (echo hello world | tr \" \" \"\n\")" {
-    run ./dsh -c <<EOF
-echo hello world | tr " " "\n"
-exit
-EOF
-    [ "$status" -eq 0 ]
-    # Check that output contains both "hello" and "world"
-    [[ "$output" == *"hello"* ]]
-    [[ "$output" == *"world"* ]]
+# Stop the server after tests
+teardown() {
+    pkill -f "$DSH_EXEC -s" || true
 }
 
-@test "Remote: Invalid command (invalidooo)" {
-    run ./dsh -c <<EOF
-invalidoooo
-exit
-EOF
-    [ "$status" -eq 0 ]
-    # Expect an error message; adjust the string as needed.
-    [[ "$output" == *"error"* ]] || [[ "$output" == *"not found"* ]]
-}
-
-@test "Remote: Built-in cd command" {
-    run ./dsh -c <<EOF
-cd ..
+@test "Basic command execution" {
+    run $DSH_EXEC -c -i $SERVER_IP -p $SERVER_PORT <<EOF
 ls
 exit
 EOF
-    [ "$status" -eq 0 ]
-    # Check that the output from ls reflects the directory change.
-    [[ "$output" == *"starter"* ]] || [[ "$output" == *"Assignments"* ]]
+    echo "$output"
+    [[ "$output" =~ "dsh4> exit" || "$output" =~ "client exited: getting next connection..." ]]
 }
 
-@test "Remote: Built-in stop-server command" {
-    run ./dsh -c <<EOF
-stop-server
+
+
+@test "Pipeline command execution" {
+    run $DSH_EXEC -c -i $SERVER_IP -p $SERVER_PORT <<EOF
+echo "hello world" | tr a-z A-Z
+exit
 EOF
-    [ "$status" -eq 0 ]
-    # Expect the output to indicate the server is stopping.
-    [[ "$output" == *"Server stopping"* ]]
+    echo "$output"
+    [[ "$output" =~ "HELLO WORLD" ]]
 }
 
-@test "Remote: Multiple sequential commands" {
-    run ./dsh -c <<EOF
+@test "Invalid command handling" {
+    run $DSH_EXEC -c -i $SERVER_IP -p $SERVER_PORT <<EOF
+invalidcmd
+exit
+EOF
+    echo "$output"
+    [[ "$output" =~ "execvp failed" ]]  # Expected failure message
+}
+
+
+@test "Multi-threaded support test" {
+    # Start multi-threaded server
+    pkill -f "$DSH_EXEC -s" || true
+    $DSH_EXEC -s -i 0.0.0.0 -p $SERVER_PORT -x > server_output.log 2>&1 &
+    sleep 1
+
+    # Run two clients simultaneously
+    $DSH_EXEC -c -i $SERVER_IP -p $SERVER_PORT <<EOF > client1_output.log 2>&1 &
 ls
 exit
 EOF
-    [ "$status" -eq 0 ]
-    # Verify that output is non-empty and contains a known file
-    [ -n "$output" ]
-}
 
-@test "Remote: Empty input" {
-    run ./dsh -c <<EOF
-<ENTER>
+    $DSH_EXEC -c -i $SERVER_IP -p $SERVER_PORT <<EOF > client2_output.log 2>&1 &
+whoami
 exit
 EOF
-    [ "$status" -eq 0 ]
-    # For empty input, output should be empty or just the prompt; adjust if needed
- trimmed=$(echo "$output" | tr -d '[:space:]') [ -z "$trimmed" ]
- }
+
+    sleep 2  # Give clients time to execute
+
+    # Validate both clients received expected output
+    run cat client1_output.log
+    echo "$output"
+    [[ "$output" =~ "dsh4>" ]]
+
+    run cat client2_output.log
+    echo "$output"
+    [[ "$output" =~ "dsh4>" ]]
+    rm client1_output.log
+    rm client2_output.log
+    rm server_output.log
+}
